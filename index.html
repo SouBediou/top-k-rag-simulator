@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Top-K Parameter Simulator for RAG</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+    <div id="root"></div>
+    
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+        const { Sliders, Target, DollarSign, TrendingUp, Lightbulb } = lucide;
+
+        function TopKSimulator() {
+            const [kValue, setKValue] = useState(5);
+            const [selectedQuestion, setSelectedQuestion] = useState('simple');
+            const [retrievedPassages, setRetrievedPassages] = useState([]);
+            const [llmResponse, setLlmResponse] = useState('');
+            const [metrics, setMetrics] = useState({});
+            const [sweetSpot, setSweetSpot] = useState({});
+
+            // HR Knowledge Base
+            const knowledgeBase = [
+                {
+                    id: 1,
+                    content: "Full-time employees are entitled to 4 working days of exceptional leave for their wedding. This duration is reduced to 2 days for part-time employees working less than 20 hours per week.",
+                    relevanceScore: 0.94,
+                    category: "direct"
+                },
+                {
+                    id: 2,
+                    content: "To qualify for marriage leave, employees must provide official documentation (marriage certificate or certificate of publication of banns) to HR at least 15 days before the planned date.",
+                    relevanceScore: 0.89,
+                    category: "direct"
+                },
+                {
+                    id: 3,
+                    content: "Marriage leave can be taken within a 30-day period before or after the ceremony. It must be taken all at once and cannot be split into separate periods.",
+                    relevanceScore: 0.87,
+                    category: "direct"
+                },
+                {
+                    id: 4,
+                    content: "Exceptional leave for marriage is fully paid and is not deducted from the employee's annual paid vacation leave balance.",
+                    relevanceScore: 0.85,
+                    category: "direct"
+                },
+                {
+                    id: 5,
+                    content: "In case of a dependent child's marriage, employees may benefit from 1 day of unpaid exceptional leave, subject to 7 days advance notice.",
+                    relevanceScore: 0.72,
+                    category: "related"
+                },
+                {
+                    id: 6,
+                    content: "Leave for family events also includes 3 days for birth/adoption, 2 days for death of a close relative, and 1 day for moving house.",
+                    relevanceScore: 0.68,
+                    category: "related"
+                },
+                {
+                    id: 7,
+                    content: "Any exceptional leave request must be validated by the direct manager and submitted to HR via the intranet portal or by email to hr@company.com.",
+                    relevanceScore: 0.65,
+                    category: "related"
+                },
+                {
+                    id: 8,
+                    content: "The remote work policy allows up to 2 days per week from home, subject to adequate equipment and managerial agreement.",
+                    relevanceScore: 0.45,
+                    category: "noise"
+                },
+                {
+                    id: 9,
+                    content: "Paid vacation is accrued at a rate of 2.5 days per month worked. The balance can be checked on the personal space of the HR portal.",
+                    relevanceScore: 0.42,
+                    category: "noise"
+                },
+                {
+                    id: 10,
+                    content: "The company parking lot has 150 spaces. Spaces are allocated based on seniority and hierarchical level.",
+                    relevanceScore: 0.22,
+                    category: "irrelevant"
+                }
+            ];
+
+            // Question types
+            const questionTypes = {
+                simple: {
+                    question: "How many days off do I get for my wedding?",
+                    optimalK: 4,
+                    description: "Simple factual question"
+                },
+                conditional: {
+                    question: "Can part-time employees get marriage leave?",
+                    optimalK: 3,
+                    description: "Conditional specific question"
+                },
+                ambiguous: {
+                    question: "What leave am I entitled to for family events?",
+                    optimalK: 6,
+                    description: "Ambiguous question requiring more context"
+                }
+            };
+
+            // Generate responses
+            const generateLLMResponse = (passages, k, questionType) => {
+                const directPassages = passages.filter(p => p.category === 'direct').length;
+                
+                if (questionType === 'simple') {
+                    if (k <= 2) {
+                        return directPassages >= 1 
+                            ? "Based on company policy, full-time employees get 4 days of marriage leave."
+                            : "I don't have enough information to provide a complete answer.";
+                    } else if (k <= 5) {
+                        return "Full-time employees are entitled to 4 working days of exceptional leave for their wedding. Part-time employees (less than 20h/week) get 2 days. This leave is fully paid.";
+                    } else {
+                        return "Full-time employees receive 4 working days of paid marriage leave, while part-time employees get 2 days. Documentation required 15 days in advance, must be taken within 30 days of ceremony.";
+                    }
+                }
+                
+                if (questionType === 'conditional') {
+                    if (k <= 2) {
+                        return "Yes, part-time employees can get marriage leave, but with reduced duration.";
+                    } else {
+                        return "Yes, part-time employees working less than 20 hours per week are entitled to 2 days of marriage leave, compared to 4 days for full-time employees.";
+                    }
+                }
+                
+                // ambiguous
+                if (k <= 3) {
+                    return "For family events, you may be entitled to marriage leave and other family-related leave depending on the specific event.";
+                } else {
+                    return "Family event leave includes: Marriage (4 days full-time, 2 days part-time), birth/adoption (3 days), death of close relative (2 days), moving house (1 day). All require documentation and manager approval.";
+                }
+            };
+
+            // Calculate metrics
+            const calculateMetrics = (passages) => {
+                const avgRelevance = passages.reduce((sum, p) => sum + p.relevanceScore, 0) / passages.length;
+                const contextLength = passages.reduce((sum, p) => sum + p.content.length, 0);
+                const tokenCount = Math.round(contextLength / 4) + 50;
+                const cost = (tokenCount / 1000) * 0.002;
+                
+                const directPassages = passages.filter(p => p.category === 'direct').length;
+                const noisePassages = passages.filter(p => p.category === 'noise' || p.category === 'irrelevant').length;
+                
+                return {
+                    relevanceScore: avgRelevance,
+                    cost: cost,
+                    tokenCount: tokenCount,
+                    directPassages: directPassages,
+                    noisePassages: noisePassages
+                };
+            };
+
+            // Sweet spot analysis
+            const getSweetSpotAnalysis = (k, optimalK) => {
+                const difference = Math.abs(k - optimalK);
+                
+                if (difference === 0) {
+                    return { message: 'Perfect! This K value offers the best balance.' };
+                } else if (difference <= 1) {
+                    return { message: 'Very good choice. Close to optimal.' };
+                } else if (k < optimalK - 1) {
+                    return { message: 'Too few passages - risk of incomplete information.' };
+                } else {
+                    return { message: 'Too many passages - introduces noise and unnecessary cost.' };
+                }
+            };
+
+            useEffect(() => {
+                const question = questionTypes[selectedQuestion];
+                const sortedPassages = [...knowledgeBase].sort((a, b) => b.relevanceScore - a.relevanceScore);
+                const topK = sortedPassages.slice(0, kValue);
+                
+                setRetrievedPassages(topK);
+                setLlmResponse(generateLLMResponse(topK, kValue, selectedQuestion));
+                setMetrics(calculateMetrics(topK));
+                setSweetSpot(getSweetSpotAnalysis(kValue, question.optimalK));
+            }, [kValue, selectedQuestion]);
+
+            return React.createElement('div', { className: "w-full min-h-screen bg-gray-50 p-4" },
+                React.createElement('div', { className: "max-w-6xl mx-auto" },
+                    // Header
+                    React.createElement('div', { className: "text-center mb-6" },
+                        React.createElement('h1', { className: "text-2xl font-bold mb-2 text-blue-900" },
+                            "Top-K Parameter Simulator for RAG"
+                        ),
+                        React.createElement('p', { className: "text-blue-800" },
+                            "Understand how the number of retrieved passages affects performance"
+                        )
+                    ),
+
+                    // Controls
+                    React.createElement('div', { className: "bg-white rounded-lg shadow-lg p-6 mb-6 border-t-4 border-pink-600" },
+                        React.createElement('div', { className: "grid grid-cols-1 md:grid-cols-2 gap-6" },
+                            // Question Selection
+                            React.createElement('div', null,
+                                React.createElement('h3', { className: "text-lg font-semibold mb-4 flex items-center text-blue-900" },
+                                    React.createElement(Target, { className: "mr-2 text-pink-600" }),
+                                    "Question Type"
+                                ),
+                                React.createElement('div', { className: "space-y-3" },
+                                    Object.entries(questionTypes).map(([key, q]) =>
+                                        React.createElement('div', { key: key, className: "border-2 border-blue-200 rounded-lg p-3" },
+                                            React.createElement('label', { className: "flex items-center cursor-pointer" },
+                                                React.createElement('input', {
+                                                    type: "radio",
+                                                    name: "question",
+                                                    checked: selectedQuestion === key,
+                                                    onChange: () => setSelectedQuestion(key),
+                                                    className: "mr-3"
+                                                }),
+                                                React.createElement('div', null,
+                                                    React.createElement('div', { className: "font-medium text-blue-900" }, q.description),
+                                                    React.createElement('div', { className: "text-sm text-blue-700" }, `"${q.question}"`),
+                                                    React.createElement('div', { className: "text-xs text-pink-600" }, `Optimal K: ${q.optimalK}`)
+                                                )
+                                            )
+                                        )
+                                    )
+                                )
+                            ),
+
+                            // K Parameter
+                            React.createElement('div', null,
+                                React.createElement('h3', { className: "text-lg font-semibold mb-4 flex items-center text-blue-900" },
+                                    React.createElement(Sliders, { className: "mr-2 text-pink-600" }),
+                                    "Top-K Parameter"
+                                ),
+                                React.createElement('div', { className: "space-y-4" },
+                                    React.createElement('div', null,
+                                        React.createElement('div', { className: "flex justify-between items-center mb-2" },
+                                            React.createElement('span', { className: "text-sm font-medium text-blue-900" }, "Number of passages:"),
+                                            React.createElement('span', { className: "text-xl font-bold text-pink-600" }, `K = ${kValue}`)
+                                        ),
+                                        React.createElement('input', {
+                                            type: "range",
+                                            min: "1",
+                                            max: "10",
+                                            value: kValue,
+                                            onChange: (e) => setKValue(parseInt(e.target.value)),
+                                            className: "w-full h-2 bg-blue-200 rounded-lg appearance-none cursor-pointer"
+                                        }),
+                                        React.createElement('div', { className: "flex justify-between text-xs mt-1 text-blue-700" },
+                                            React.createElement('span', null, "1"),
+                                            React.createElement('span', null, "5"),
+                                            React.createElement('span', null, "10")
+                                        )
+                                    ),
+
+                                    React.createElement('div', { className: "bg-blue-100 p-4 rounded-lg" },
+                                        React.createElement('div', { className: "flex items-center" },
+                                            React.createElement(Lightbulb, { className: "w-5 h-5 mr-2 text-pink-600" }),
+                                            React.createElement('div', null,
+                                                React.createElement('div', { className: "font-medium text-blue-900" }, "Analysis"),
+                                                React.createElement('div', { className: "text-sm text-blue-800" }, sweetSpot.message)
+                                            )
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                    ),
+
+                    // Results
+                    React.createElement('div', { className: "grid grid-cols-1 lg:grid-cols-2 gap-6" },
+                        // Passages
+                        React.createElement('div', { className: "bg-white rounded-lg shadow-lg p-6 border-t-4 border-pink-600" },
+                            React.createElement('h3', { className: "text-lg font-semibold mb-4 text-blue-900" },
+                                `Retrieved Passages (Top ${kValue})`
+                            ),
+                            React.createElement('div', { className: "space-y-3 max-h-80 overflow-y-auto" },
+                                retrievedPassages.map((passage, index) =>
+                                    React.createElement('div', { 
+                                        key: passage.id, 
+                                        className: `p-3 rounded-lg border-l-4 ${
+                                            passage.category === 'direct' 
+                                                ? 'border-pink-600 bg-blue-50' 
+                                                : 'border-blue-300 bg-gray-50'
+                                        }`
+                                    },
+                                        React.createElement('div', { className: "flex justify-between items-start mb-2" },
+                                            React.createElement('span', { className: "text-sm font-semibold text-blue-900" }, `#${index + 1}`),
+                                            React.createElement('div', { className: "text-right" },
+                                                React.createElement('div', { className: "text-sm font-bold text-pink-600" },
+                                                    passage.relevanceScore.toFixed(3)
+                                                ),
+                                                React.createElement('div', { className: "text-xs text-blue-700 capitalize" },
+                                                    passage.category
+                                                )
+                                            )
+                                        ),
+                                        React.createElement('div', { className: "text-sm text-blue-900" },
+                                            passage.content
+                                        )
+                                    )
+                                )
+                            )
+                        ),
+
+                        // Response & Metrics
+                        React.createElement('div', { className: "space-y-6" },
+                            // LLM Response
+                            React.createElement('div', { className: "bg-white rounded-lg shadow-lg p-6 border-t-4 border-pink-600" },
+                                React.createElement('h3', { className: "text-lg font-semibold mb-4 text-blue-900" }, "Generated Response"),
+                                React.createElement('div', { className: "bg-blue-50 p-4 rounded-lg" },
+                                    React.createElement('div', { className: "text-sm font-medium mb-2 text-blue-800" },
+                                        `Question: "${questionTypes[selectedQuestion].question}"`
+                                    ),
+                                    React.createElement('div', { className: "text-blue-900" }, llmResponse)
+                                )
+                            ),
+
+                            // Metrics
+                            React.createElement('div', { className: "bg-white rounded-lg shadow-lg p-6 border-t-4 border-pink-600" },
+                                React.createElement('h3', { className: "text-lg font-semibold mb-4 text-blue-900" }, "Metrics"),
+                                React.createElement('div', { className: "grid grid-cols-2 gap-4" },
+                                    React.createElement('div', { className: "bg-blue-50 p-4 rounded-lg" },
+                                        React.createElement('div', { className: "flex items-center mb-2" },
+                                            React.createElement(TrendingUp, { className: "w-4 h-4 mr-2 text-pink-600" }),
+                                            React.createElement('span', { className: "text-sm font-medium text-blue-900" }, "Relevance")
+                                        ),
+                                        React.createElement('div', { className: "text-xl font-bold text-pink-600" },
+                                            metrics.relevanceScore?.toFixed(3)
+                                        )
+                                    ),
+
+                                    React.createElement('div', { className: "bg-blue-50 p-4 rounded-lg" },
+                                        React.createElement('div', { className: "flex items-center mb-2" },
+                                            React.createElement(DollarSign, { className: "w-4 h-4 mr-2 text-pink-600" }),
+                                            React.createElement('span', { className: "text-sm font-medium text-blue-900" }, "Cost")
+                                        ),
+                                        React.createElement('div', { className: "text-xl font-bold text-pink-600" },
+                                            `$${metrics.cost?.toFixed(4)}`
+                                        )
+                                    ),
+
+                                    React.createElement('div', { className: "bg-blue-50 p-4 rounded-lg" },
+                                        React.createElement('div', { className: "text-sm font-medium text-blue-900" }, "Signal"),
+                                        React.createElement('div', { className: "text-lg font-bold text-pink-600" },
+                                            `${metrics.directPassages}/${kValue}`
+                                        )
+                                    ),
+
+                                    React.createElement('div', { className: "bg-blue-50 p-4 rounded-lg" },
+                                        React.createElement('div', { className: "text-sm font-medium text-blue-900" }, "Noise"),
+                                        React.createElement('div', { className: "text-lg font-bold text-pink-600" },
+                                            `${metrics.noisePassages}/${kValue}`
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                    ),
+
+                    // Learning Points
+                    React.createElement('div', { className: "mt-6 bg-white rounded-lg shadow-lg p-6 border-t-4 border-pink-600" },
+                        React.createElement('h3', { className: "text-lg font-semibold mb-4 text-blue-900" }, "Key Learning Points"),
+                        React.createElement('div', { className: "grid grid-cols-1 md:grid-cols-3 gap-4" },
+                            React.createElement('div', null,
+                                React.createElement('h4', { className: "font-medium mb-2 text-blue-900" }, "K Too Low (1-2)"),
+                                React.createElement('ul', { className: "text-sm space-y-1 text-blue-800" },
+                                    React.createElement('li', null, "• Risk of incomplete answers"),
+                                    React.createElement('li', null, "• Lower cost"),
+                                    React.createElement('li', null, "• May miss context")
+                                )
+                            ),
+                            React.createElement('div', null,
+                                React.createElement('h4', { className: "font-medium mb-2 text-blue-900" }, "K Optimal (3-6)"),
+                                React.createElement('ul', { className: "text-sm space-y-1 text-blue-800" },
+                                    React.createElement('li', null, "• Good info/cost balance"),
+                                    React.createElement('li', null, "• Sufficient context"),
+                                    React.createElement('li', null, "• Minimal noise")
+                                )
+                            ),
+                            React.createElement('div', null,
+                                React.createElement('h4', { className: "font-medium mb-2 text-blue-900" }, "K Too High (7+)"),
+                                React.createElement('ul', { className: "text-sm space-y-1 text-blue-800" },
+                                    React.createElement('li', null, "• Introduces noise"),
+                                    React.createElement('li', null, "• Higher cost"),
+                                    React.createElement('li', null, "• May confuse LLM")
+                                )
+                            )
+                        )
+                    )
+                )
+            );
+        }
+
+        ReactDOM.render(React.createElement(TopKSimulator), document.getElementById('root'));
+    </script>
+</body>
+</html>
